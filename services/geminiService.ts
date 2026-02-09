@@ -1,7 +1,8 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Initialize with strictly process.env.API_KEY as per guidelines
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generateSupplyQuotes = async () => {
   try {
@@ -12,7 +13,8 @@ export const generateSupplyQuotes = async () => {
         responseMimeType: "application/json"
       }
     });
-    return JSON.parse(response.text);
+    // Access text property directly as per guidelines
+    return JSON.parse(response.text || '[]');
   } catch (error) {
     console.error("Failed to generate quotes:", error);
     return null;

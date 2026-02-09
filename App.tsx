@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { View, Moment, GardenState, TimeSlot, DailyQuote } from './types';
 import { TIME_SLOTS, EMOJIS } from './constants.tsx';
 import { 
@@ -11,17 +11,34 @@ import {
   getYesterday 
 } from './utils';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
+// Helper for generating quotes with proper schema
 const fetchDailyQuotes = async (): Promise<DailyQuote[] | null> => {
   try {
+    // Correctly initialize with process.env.API_KEY as per guidelines
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "为‘情绪补给站’生成今日的4条能量文案。时间：08:00, 11:00, 18:00, 22:00。要求：极其温柔、极其治愈。返回JSON格式：[{time: string, text: string, emoji: string}]",
-      config: { responseMimeType: "application/json" }
+      contents: "为‘情绪补给站’生成今日的4条能量文案。时间节点：08:00, 11:00, 18:00, 22:00。要求：极其温柔、极其治愈、不含恋爱词汇。返回4个对象的数组。",
+      config: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              time: { type: Type.STRING, description: "08:00, 11:00, 18:00, or 22:00" },
+              text: { type: Type.STRING, description: "Healing and high-energy copy" },
+              emoji: { type: Type.STRING, description: "A fitting emoji" }
+            },
+            required: ["time", "text", "emoji"]
+          }
+        }
+      }
     });
-    return JSON.parse(response.text);
+    // Access .text property directly
+    return JSON.parse(response.text || '[]');
   } catch (e) {
+    console.error("AI Generation failed:", e);
     return null;
   }
 };
@@ -42,16 +59,16 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const m = localStorage.getItem('garden_moments_v3');
+    const m = localStorage.getItem('garden_moments_v4');
     if (m) setMoments(JSON.parse(m));
-    const g = localStorage.getItem('garden_state_v3');
+    const g = localStorage.getItem('garden_state_v4');
     if (g) setGarden(JSON.parse(g));
     fetchDailyQuotes().then(q => q && setAiQuotes(q));
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('garden_moments_v3', JSON.stringify(moments));
-    localStorage.setItem('garden_state_v3', JSON.stringify(garden));
+    localStorage.setItem('garden_moments_v4', JSON.stringify(moments));
+    localStorage.setItem('garden_state_v4', JSON.stringify(garden));
   }, [moments, garden]);
 
   // Daily Rose
@@ -90,18 +107,25 @@ const App: React.FC = () => {
   };
 
   if (view === 'intro') return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-10 text-center animate-fadeIn relative overflow-hidden">
-       <div className="w-64 h-64 bg-[#fcd5ce] rounded-full blur-[80px] absolute -top-10 -left-10 opacity-60 animate-float" />
-       <div className="w-64 h-64 bg-[#ffb5a7] rounded-full blur-[80px] absolute -bottom-10 -right-10 opacity-40 animate-float" style={{animationDelay: '-3s'}} />
+    <div className="flex flex-col items-center justify-center min-h-screen px-10 text-center animate-fadeIn relative overflow-hidden bg-[#fff0f3]">
+       <div className="w-80 h-80 bg-[#ffb5a7] rounded-full blur-[100px] absolute -top-20 -left-20 opacity-50 animate-float" />
+       <div className="w-80 h-80 bg-[#ffccd5] rounded-full blur-[100px] absolute -bottom-20 -right-20 opacity-50 animate-float" style={{animationDelay: '-3s'}} />
        
-       <h1 className="text-4xl font-light tracking-[0.4em] text-[#5d5c5a] serif mb-6 relative z-10">爱意花园</h1>
-       <p className="text-[#8a8987] font-light leading-loose serif relative z-10 max-w-[240px] mx-auto">在粉色的梦境里，<br/>收集每一份细微的温柔。</p>
-       <button onClick={() => setView('home')} className="mt-20 px-14 py-4 bg-[#ffb5a7] text-white rounded-full shadow-2xl shadow-pink-200 active:scale-90 transition-all font-bold tracking-[0.2em] text-sm relative z-10 border border-white/20">开启补给</button>
+       <div className="relative z-10 space-y-8">
+         <div className="text-6xl mb-4 animate-float">🌸</div>
+         <h1 className="text-4xl font-light tracking-[0.4em] text-[#5d5c5a] serif mb-4">爱意花园</h1>
+         <p className="text-[#8a8987] font-light leading-loose serif max-w-[280px] mx-auto text-lg">
+           在深浅不一的粉色里，<br/>温柔地接纳自己。
+         </p>
+         <button onClick={() => setView('home')} className="mt-12 px-16 py-4 bg-[#ffb5a7] text-white rounded-full shadow-2xl shadow-pink-300/50 active:scale-95 transition-all font-bold tracking-[0.2em] text-base border border-white/30">
+           开启治愈
+         </button>
+       </div>
     </div>
   );
 
   return (
-    <div className="max-w-md mx-auto min-h-screen pb-36 relative no-scrollbar">
+    <div className="max-w-md mx-auto min-h-screen pb-40 relative no-scrollbar">
       {view === 'home' && <HomeView aiQuotes={aiQuotes} time={currentTime} />}
       {view === 'timeline' && (
         <TimelineView 
@@ -112,8 +136,8 @@ const App: React.FC = () => {
       )}
       {view === 'garden' && <GardenView garden={garden} moments={moments} />}
 
-      {/* Main Navigation - Pink Themed */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-sm h-18 bg-white/60 backdrop-blur-3xl rounded-[2.5rem] flex items-center justify-around px-8 z-50 shadow-2xl border border-white/50">
+      {/* Main Navigation - Primary Pink */}
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[92%] max-w-sm h-20 bg-white/70 backdrop-blur-3xl rounded-[2.5rem] flex items-center justify-around px-8 z-50 shadow-2xl border border-pink-100/50">
         {[
           { id: 'home', label: '补给', icon: '☁️' },
           { id: 'timeline', label: '此刻', icon: '✍️' },
@@ -122,11 +146,13 @@ const App: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setView(tab.id as View)}
-            className={`flex flex-col items-center transition-all duration-500 py-2 ${view === tab.id ? 'text-[#e5989b] scale-110 drop-shadow-md' : 'text-gray-400 opacity-60'}`}
+            className={`flex flex-col items-center transition-all duration-500 py-2 relative ${view === tab.id ? 'text-[#e5989b] scale-110' : 'text-gray-400 opacity-50'}`}
           >
             <span className="text-2xl mb-1">{tab.icon}</span>
-            <span className="text-[10px] font-black uppercase tracking-widest">{tab.label}</span>
-            {view === tab.id && <div className="w-1.5 h-1.5 bg-[#e5989b] rounded-full mt-1" />}
+            <span className="text-[10px] font-black uppercase tracking-[0.1em]">{tab.label}</span>
+            {view === tab.id && (
+              <div className="absolute -bottom-1 w-1.5 h-1.5 bg-[#e5989b] rounded-full shadow-lg shadow-pink-200" />
+            )}
           </button>
         ))}
       </div>
@@ -155,27 +181,27 @@ const HomeView: React.FC<{ aiQuotes: DailyQuote[], time: Date }> = ({ aiQuotes, 
   }, [aiQuotes, activeSlot, time]);
 
   return (
-    <div className="p-8 space-y-14 animate-fadeIn text-center">
-      <div className="pt-16 space-y-3 relative">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-56 h-56 bg-[#ffb5a7] rounded-full blur-[90px] opacity-30 -z-10" />
-        <h1 className="big-time serif text-[#5d5c5a] tracking-tight">{timeStr}</h1>
+    <div className="p-8 space-y-16 animate-fadeIn text-center">
+      <div className="pt-20 space-y-4 relative">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-64 bg-[#ffb5a7] rounded-full blur-[100px] opacity-25 -z-10" />
+        <h1 className="big-time serif text-[#5d5c5a] tracking-tighter drop-shadow-sm">{timeStr}</h1>
         <div className="space-y-1">
-          <p className="text-xl font-light text-[#5d5c5a] serif tracking-[0.1em]">{dateStr}</p>
-          <div className="w-8 h-0.5 bg-[#e5989b] mx-auto mt-4 rounded-full opacity-40" />
+          <p className="text-2xl font-light text-[#5d5c5a] serif tracking-widest">{dateStr}</p>
+          <div className="w-12 h-0.5 bg-[#ffb5a7] mx-auto mt-6 rounded-full opacity-60" />
         </div>
       </div>
 
-      <div className="dreamy-card p-12 rounded-[3.5rem] animate-float mt-8 relative overflow-hidden group">
-        <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-50" />
-        <div className="text-5xl mb-8 drop-shadow-lg scale-110 group-hover:scale-125 transition-transform duration-700">{currentQuote.emoji}</div>
-        <p className="serif text-2xl leading-[1.8] text-[#5d5c5a] font-medium tracking-wide px-2">
+      <div className="dreamy-card p-12 rounded-[4rem] animate-float mt-10">
+        <div className="text-6xl mb-8 transform transition-transform hover:scale-125 duration-700">{currentQuote.emoji}</div>
+        <p className="text-[#5d5c5a] serif text-2xl leading-relaxed font-light px-4 tracking-wide">
           {currentQuote.text}
         </p>
-        <div className="mt-10 flex justify-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-[#ffb5a7] shadow-inner" />
-          <div className="w-2.5 h-2.5 rounded-full bg-[#fcd5ce] shadow-inner" />
-          <div className="w-2.5 h-2.5 rounded-full bg-[#bde0fe] shadow-inner opacity-60" />
-        </div>
+      </div>
+
+      <div className="flex justify-center items-center gap-4 text-[#8a8987] font-light serif text-sm tracking-widest opacity-60">
+        <span className="w-8 h-px bg-current" />
+        <span>补给站正守护你的情绪</span>
+        <span className="w-8 h-px bg-current" />
       </div>
     </div>
   );
@@ -183,84 +209,61 @@ const HomeView: React.FC<{ aiQuotes: DailyQuote[], time: Date }> = ({ aiQuotes, 
 
 // --- Timeline View ---
 
-const TimelineView: React.FC<{ moments: Moment[]; onAdd: (c: string) => void; onPartnerAction: (id: string, type: 'rose' | 'received') => void; }> = ({ moments, onAdd, onPartnerAction }) => {
+const TimelineView: React.FC<{ 
+  moments: Moment[], 
+  onAdd: (c: string) => void,
+  onPartnerAction: (id: string, type: 'rose' | 'received') => void
+}> = ({ moments, onAdd, onPartnerAction }) => {
   const [input, setInput] = useState('');
-  const [showEmoji, setShowEmoji] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    onAdd(input);
+    setInput('');
+  };
 
   return (
-    <div className="p-8 space-y-10 animate-fadeIn">
-      <header className="flex flex-col items-start gap-1">
-        <h2 className="text-3xl font-bold text-[#5d5c5a] serif">写下此刻</h2>
-        <div className="h-1 w-12 bg-[#ffb5a7] rounded-full" />
-      </header>
-
-      <div className="dreamy-card p-8 rounded-[2.5rem] space-y-6 shadow-2xl border-white/70">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="此刻的心情是粉色的吗？"
-          className="w-full h-28 bg-transparent border-none focus:ring-0 text-base serif placeholder:opacity-30 placeholder:text-[#5d5c5a] resize-none"
-        />
-        <div className="flex justify-between items-center pt-2">
-          <button 
-            onClick={() => setShowEmoji(!showEmoji)} 
-            className={`w-12 h-12 flex items-center justify-center rounded-full shadow-inner transition-colors ${showEmoji ? 'bg-[#ffb5a7] text-white' : 'bg-white/50 text-gray-500'}`}
-          >
-            😊
-          </button>
-          <button 
-            onClick={() => { if(input.trim()){ onAdd(input); setInput(''); setShowEmoji(false); } }}
-            className="px-10 py-3 bg-[#ffb5a7] text-white font-black text-xs tracking-[0.3em] rounded-full shadow-xl shadow-pink-100 hover:brightness-105 active:scale-95 transition-all"
-          >
-            发布心声
-          </button>
-        </div>
-        {showEmoji && (
-          <div className="grid grid-cols-6 gap-4 pt-4 p-5 bg-white/50 rounded-3xl animate-popIn border border-white/40">
-            {EMOJIS.map(e => (
-              <button 
-                key={e} 
-                onClick={() => setInput(i => i + e)} 
-                className="text-2xl hover:scale-125 transition-transform flex items-center justify-center p-1"
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        )}
+    <div className="p-8 space-y-12 animate-fadeIn pt-16">
+      <div className="text-center space-y-2 mb-12">
+        <h2 className="text-3xl font-light serif text-[#5d5c5a] tracking-widest">此刻的情绪</h2>
+        <p className="text-xs text-[#8a8987] serif tracking-[0.2em] opacity-60 uppercase">Record your inner garden</p>
       </div>
 
-      <div className="space-y-8 pb-24">
-        {moments.map(m => (
-          <div key={m.id} className="dreamy-card p-8 rounded-[3rem] animate-fadeIn hover:shadow-2xl transition-all duration-500 border-white/60">
-            <p className="text-[17px] serif leading-relaxed mb-6 text-[#5d5c5a] font-medium">{m.content}</p>
-            <div className="flex justify-between items-center border-t border-white/40 pt-6">
-              <span className="text-[11px] opacity-50 font-black tracking-tighter text-[#8d8c8a]">
-                {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => onPartnerAction(m.id, 'rose')}
-                  className={`px-5 py-2.5 rounded-full text-[10px] font-black transition-all border shadow-sm ${m.hasRose ? 'bg-[#ffb5a7] border-transparent text-white scale-105' : 'bg-white/50 border-white/30 text-gray-400 hover:bg-white/80'}`}
-                >
-                  🌹 {m.hasRose ? '对方已送花' : '送花'}
-                </button>
-                <button 
-                  onClick={() => onPartnerAction(m.id, 'received')}
-                  className={`px-5 py-2.5 rounded-full text-[10px] font-black transition-all border shadow-sm ${m.isReceived ? 'bg-[#95d5b2] border-transparent text-white scale-105' : 'bg-white/50 border-white/30 text-gray-400 hover:bg-white/80'}`}
-                >
-                  ✓ {m.isReceived ? '对方已接收' : '我收到了'}
-                </button>
+      <form onSubmit={handleSubmit} className="relative group">
+        <div className="absolute inset-0 bg-[#ffccd5] rounded-[2.5rem] blur-xl opacity-20 group-focus-within:opacity-40 transition-opacity" />
+        <input 
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="写下这一刻的感受..."
+          className="w-full p-8 pr-20 bg-white/60 backdrop-blur-md rounded-[2.5rem] border border-pink-100 outline-none text-[#5d5c5a] serif placeholder:text-[#8a8987]/50 relative z-10 transition-all focus:bg-white"
+        />
+        <button type="submit" className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-[#ffb5a7] text-white rounded-full z-20 flex items-center justify-center shadow-lg active:scale-90 transition-transform">
+          ✨
+        </button>
+      </form>
+
+      <div className="space-y-8 relative pb-20">
+        <div className="absolute left-6 top-4 bottom-0 w-px bg-pink-100 opacity-50" />
+        {moments.map((m, idx) => (
+          <div key={m.id} className="flex gap-6 animate-slideIn" style={{ animationDelay: `${idx * 0.1}s` }}>
+            <div className="relative z-10 w-12 h-12 bg-white rounded-full flex items-center justify-center border-4 border-[#fff0f3] shadow-sm text-lg">
+              {idx % 3 === 0 ? '🌸' : idx % 3 === 1 ? '☁️' : '🌿'}
+            </div>
+            <div className="flex-1 space-y-4">
+              <div className="bg-white/40 backdrop-blur-sm p-6 rounded-[2rem] border border-pink-50/50 shadow-sm">
+                <p className="text-[#5d5c5a] serif leading-relaxed">{m.content}</p>
+                <div className="mt-4 flex items-center justify-between text-[10px] text-[#8a8987] serif tracking-widest opacity-60 uppercase">
+                  <span>{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <div className="flex gap-4">
+                    <button onClick={() => onPartnerAction(m.id, 'rose')} className={`transition-all ${m.hasRose ? 'grayscale-0 scale-125' : 'grayscale opacity-30'}`}>🌹</button>
+                    <button onClick={() => onPartnerAction(m.id, 'received')} className={`transition-all ${m.isReceived ? 'grayscale-0 scale-125' : 'grayscale opacity-30'}`}>💌</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         ))}
-        {moments.length === 0 && (
-          <div className="text-center py-20 animate-pulse opacity-40">
-             <div className="text-4xl mb-4">✍️</div>
-             <p className="serif text-sm">写下第一句温柔的话语吧</p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -270,75 +273,61 @@ const TimelineView: React.FC<{ moments: Moment[]; onAdd: (c: string) => void; on
 
 const GardenView: React.FC<{ garden: GardenState, moments: Moment[] }> = ({ garden, moments }) => {
   const days = getDaysInMonth(new Date().getFullYear(), new Date().getMonth());
-  const [selectedDay, setSelectedDay] = useState<number | null>(null);
-
-  const dayMoments = useMemo(() => {
-    if (selectedDay === null) return [];
-    return moments.filter(m => {
-      const d = new Date(m.timestamp);
-      return d.getDate() === selectedDay && d.getMonth() === new Date().getMonth();
-    });
-  }, [selectedDay, moments]);
+  const monthName = new Date().toLocaleString('en-US', { month: 'long' });
 
   return (
-    <div className="p-8 space-y-12 animate-fadeIn">
-      <header className="flex justify-between items-end pt-4">
-        <div className="space-y-1">
-          <h2 className="text-3xl font-bold text-[#5d5c5a] serif">爱意花园</h2>
-          <div className="h-1 w-10 bg-[#ffb5a7] rounded-full" />
+    <div className="p-8 space-y-12 animate-fadeIn pt-16 pb-32">
+       <div className="text-center space-y-4 mb-12">
+        <div className="inline-block px-4 py-1 bg-white/50 backdrop-blur-sm border border-pink-100 rounded-full text-[10px] text-[#e5989b] serif tracking-[0.2em] mb-2">
+          MONTHLY BLOOMING
         </div>
-        <span className="text-[11px] bg-[#ffb5a7] text-white px-5 py-2 rounded-full font-black shadow-lg shadow-pink-100 tracking-widest">
-          连击 {garden.streak} 天
-        </span>
-      </header>
+        <h2 className="text-3xl font-light serif text-[#5d5c5a] tracking-widest">{monthName}</h2>
+        <div className="flex justify-center gap-8 pt-4">
+          <div className="text-center">
+            <div className="text-2xl font-light text-[#5d5c5a] serif mb-1">{garden.roses.length}</div>
+            <div className="text-[9px] text-[#8a8987] tracking-[0.2em] uppercase">Blossoms</div>
+          </div>
+          <div className="w-px h-8 bg-pink-100" />
+          <div className="text-center">
+            <div className="text-2xl font-light text-[#5d5c5a] serif mb-1">{garden.streak}d</div>
+            <div className="text-[9px] text-[#8a8987] tracking-[0.2em] uppercase">Streak</div>
+          </div>
+        </div>
+      </div>
 
-      <div className="dreamy-card p-10 rounded-[3.5rem] grid grid-cols-5 gap-y-10 gap-x-4 shadow-pink-100/20">
+      <div className="grid grid-cols-7 gap-3">
         {Array.from({ length: days }).map((_, i) => {
           const day = i + 1;
-          const hasRose = garden.roses.includes(day);
+          const collected = garden.roses.includes(day);
+          const isToday = day === new Date().getDate();
           return (
-            <button 
-              key={day}
-              onClick={() => setSelectedDay(day)}
-              className="flex flex-col items-center gap-2 active:scale-90 transition-transform"
+            <div 
+              key={day} 
+              className={`aspect-square rounded-2xl flex flex-col items-center justify-center relative transition-all duration-700 ${
+                collected 
+                ? 'bg-[#ffccd5] border-pink-100/50 shadow-inner' 
+                : 'bg-white/30 border border-white/50'
+              } ${isToday ? 'ring-2 ring-[#ffb5a7] ring-offset-4 ring-offset-[#fff0f3]' : ''}`}
             >
-              <div className={`w-14 h-14 flex items-center justify-center transition-all duration-1000 ${hasRose ? 'opacity-100 scale-110' : 'opacity-20 scale-90'}`}>
-                <span className={`text-3xl ${hasRose && garden.streak >= 7 ? 'glow-rose' : ''}`}>🌹</span>
-              </div>
-              <span className={`text-[11px] font-black tracking-tighter ${hasRose ? 'text-[#e5989b]' : 'text-gray-300'}`}>{day}</span>
-            </button>
+              <span className={`text-[8px] serif absolute top-1.5 left-2 ${collected ? 'text-[#e5989b]' : 'text-gray-300'}`}>
+                {day.toString().padStart(2, '0')}
+              </span>
+              {collected && (
+                <span className="text-lg animate-float" style={{ animationDelay: `${i * 0.05}s` }}>
+                  {day % 2 === 0 ? '🌸' : '🌹'}
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
 
-      {selectedDay !== null && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 bg-black/10 backdrop-blur-xl animate-fadeIn" onClick={() => setSelectedDay(null)}>
-          <div className="dreamy-card w-full max-h-[80vh] overflow-y-auto p-12 rounded-[4rem] animate-popIn relative shadow-3xl" onClick={e => e.stopPropagation()}>
-             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#ffb5a7] via-[#fcd5ce] to-[#bde0fe]" />
-            <div className="flex justify-between items-center mb-10">
-              <div className="space-y-1">
-                <h3 className="serif font-black text-2xl text-[#5d5c5a]">{selectedDay}日 溯源</h3>
-                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Memories</p>
-              </div>
-              <button onClick={() => setSelectedDay(null)} className="w-10 h-10 flex items-center justify-center bg-gray-50 rounded-full text-2xl text-gray-300 hover:text-[#ffb5a7] transition-colors">×</button>
-            </div>
-            <div className="space-y-8">
-              {dayMoments.length > 0 ? dayMoments.map(m => (
-                <div key={m.id} className="bg-white/50 p-8 rounded-[2rem] border border-white/60 shadow-sm hover:shadow-md transition-shadow">
-                  <p className="text-base serif mb-4 text-[#5d5c5a] leading-loose italic">"{m.content}"</p>
-                  <div className="flex items-center gap-2">
-                    <div className="h-px flex-1 bg-gray-100" />
-                    <span className="text-[10px] opacity-40 font-black tracking-widest">{new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                  </div>
-                </div>
-              )) : <div className="text-center py-24">
-                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6 text-3xl opacity-30">☁️</div>
-                    <p className="opacity-40 italic serif text-sm">那天风很轻，<br/>花园里只有玫瑰盛开的声音。</p>
-                  </div>}
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="dreamy-card p-8 rounded-[3rem] mt-12 bg-white/40 border-white/50">
+        <h3 className="text-center serif text-[#5d5c5a] text-sm tracking-widest mb-6 opacity-60">FLOWER LANGUAGE</h3>
+        <p className="text-center text-[#8a8987] serif italic text-xs leading-loose px-4">
+          "每一朵在爱里盛开的花，<br/>都记得你对抗寒冬的勇气。"
+        </p>
+      </div>
     </div>
   );
 };
