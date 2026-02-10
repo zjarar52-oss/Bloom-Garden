@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { View, Moment, GardenState, TimeSlot, DailyQuote } from './types';
 import { TIME_SLOTS, EMOJIS } from './constants.tsx';
 import { 
@@ -10,35 +9,37 @@ import {
   getDaysInMonth, 
   getYesterday 
 } from './utils';
+import { dbClient } from './dbClient';
 
-// Helper for generating quotes with proper schema
+// --- DeepSeek API 集成 ---
 const fetchDailyQuotes = async (): Promise<DailyQuote[] | null> => {
   try {
-    // Correctly initialize with process.env.API_KEY as per guidelines
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: "为‘情绪补给站’生成今日的4条能量文案。时间节点：08:00, 11:00, 18:00, 22:00。要求：极其温柔、极其治愈、不含恋爱词汇。返回4个对象的数组。",
-      config: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              time: { type: Type.STRING, description: "08:00, 11:00, 18:00, or 22:00" },
-              text: { type: Type.STRING, description: "Healing and high-energy copy" },
-              emoji: { type: Type.STRING, description: "A fitting emoji" }
-            },
-            required: ["time", "text", "emoji"]
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个治愈系情绪补给站的文案生成器。请严格输出JSON格式。JSON为一个对象，包含一个"quotes"数组，内含4个对象。字段：time (08:00, 11:00, 18:00, 22:00)，text (极度温柔治愈的高能量文案，不含恋爱词汇)，emoji (匹配的表情)。'
           }
-        }
-      }
+        ],
+        response_format: { type: 'json_object' }
+      })
     });
-    // Access .text property directly
-    return JSON.parse(response.text || '[]');
+    
+    const data = await response.json();
+    if (data.choices?.[0]?.message?.content) {
+      const content = JSON.parse(data.choices[0].message.content);
+      return content.quotes || [];
+    }
+    return null;
   } catch (e) {
-    console.error("AI Generation failed:", e);
+    console.error("DeepSeek API failed:", e);
     return null;
   }
 };
@@ -51,6 +52,7 @@ const App: React.FC = () => {
   const [garden, setGarden] = useState<GardenState>({ roses: [], streak: 0, lastCollectionDate: null });
   const [aiQuotes, setAiQuotes] = useState<DailyQuote[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [isSynced, setIsSynced] = useState(false);
 
   // Clock tick
   useEffect(() => {
@@ -58,33 +60,36 @@ const App: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // 实时数据库同步挂载
   useEffect(() => {
-    const m = localStorage.getItem('garden_moments_v4');
-    if (m) setMoments(JSON.parse(m));
-    const g = localStorage.getItem('garden_state_v4');
-    if (g) setGarden(JSON.parse(g));
+    const cleanup = dbClient.setupSync(
+      (m) => setMoments(m),
+      (g) => {
+        setGarden(g);
+        setIsSynced(true); // 确保云端数据加载完成后，才进行当天的玫瑰结算
+      }
+    );
     fetchDailyQuotes().then(q => q && setAiQuotes(q));
+    return cleanup;
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('garden_moments_v4', JSON.stringify(moments));
-    localStorage.setItem('garden_state_v4', JSON.stringify(garden));
-  }, [moments, garden]);
 
   // Daily Rose
   useEffect(() => {
+    if (!isSynced) return; // 防竞态：云端数据未拉取前不进行覆盖
+    
     const todayStr = formatDate(new Date());
     if (garden.lastCollectionDate !== todayStr) {
       const day = new Date().getDate();
       const isStreak = garden.lastCollectionDate === getYesterday(todayStr);
-      setGarden(prev => ({
-        ...prev,
-        roses: [...new Set([...prev.roses, day])],
-        streak: isStreak ? prev.streak + 1 : 1,
+      const newGarden = {
+        roses: [...new Set([...garden.roses, day])],
+        streak: isStreak ? garden.streak + 1 : 1,
         lastCollectionDate: todayStr
-      }));
+      };
+      setGarden(newGarden);
+      dbClient.saveGarden(newGarden);
     }
-  }, [garden.lastCollectionDate]);
+  }, [garden.lastCollectionDate, isSynced]);
 
   const addMoment = (content: string) => {
     const nm: Moment = {
@@ -94,16 +99,20 @@ const App: React.FC = () => {
       hasRose: false,
       isReceived: false
     };
-    setMoments([nm, ...moments]);
+    const newMoments = [nm, ...moments];
+    setMoments(newMoments);
+    dbClient.saveMoments(newMoments); // 同步到云端
   };
 
   const handlePartnerAction = (id: string, type: 'rose' | 'received') => {
-    setMoments(prev => prev.map(m => {
+    const newMoments = moments.map(m => {
       if (m.id === id) {
         return type === 'rose' ? { ...m, hasRose: !m.hasRose } : { ...m, isReceived: !m.isReceived };
       }
       return m;
-    }));
+    });
+    setMoments(newMoments);
+    dbClient.saveMoments(newMoments); // 同步到云端
   };
 
   if (view === 'intro') return (
@@ -115,7 +124,7 @@ const App: React.FC = () => {
          <div className="text-6xl mb-4 animate-float">🌸</div>
          <h1 className="text-4xl font-light tracking-[0.4em] text-[#5d5c5a] serif mb-4">爱意花园</h1>
          <p className="text-[#8a8987] font-light leading-loose serif max-w-[280px] mx-auto text-lg">
-           在深浅不一的粉色里，<br/>温柔地接纳自己。
+           治愈你的情绪，<br/>读懂你的心意，<br/>陪伴如约而至。
          </p>
          <button onClick={() => setView('home')} className="mt-12 px-16 py-4 bg-[#ffb5a7] text-white rounded-full shadow-2xl shadow-pink-300/50 active:scale-95 transition-all font-bold tracking-[0.2em] text-base border border-white/30">
            开启治愈
@@ -136,7 +145,7 @@ const App: React.FC = () => {
       )}
       {view === 'garden' && <GardenView garden={garden} moments={moments} />}
 
-      {/* Main Navigation - Primary Pink */}
+      {/* Main Navigation */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[92%] max-w-sm h-20 bg-white/70 backdrop-blur-3xl rounded-[2.5rem] flex items-center justify-around px-8 z-50 shadow-2xl border border-pink-100/50">
         {[
           { id: 'home', label: '补给', icon: '☁️' },
@@ -161,7 +170,6 @@ const App: React.FC = () => {
 };
 
 // --- Home View (Station) ---
-
 const HomeView: React.FC<{ aiQuotes: DailyQuote[], time: Date }> = ({ aiQuotes, time }) => {
   const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   const dateStr = getChineseDateStr(time);
@@ -208,7 +216,6 @@ const HomeView: React.FC<{ aiQuotes: DailyQuote[], time: Date }> = ({ aiQuotes, 
 };
 
 // --- Timeline View ---
-
 const TimelineView: React.FC<{ 
   moments: Moment[], 
   onAdd: (c: string) => void,
@@ -270,7 +277,6 @@ const TimelineView: React.FC<{
 };
 
 // --- Garden View ---
-
 const GardenView: React.FC<{ garden: GardenState, moments: Moment[] }> = ({ garden, moments }) => {
   const days = getDaysInMonth(new Date().getFullYear(), new Date().getMonth());
   const monthName = new Date().toLocaleString('en-US', { month: 'long' });
