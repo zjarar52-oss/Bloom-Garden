@@ -1,5 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Volume2, VolumeX } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { View, Moment, GardenState, TimeSlot, DailyQuote } from './types';
 import { TIME_SLOTS, EMOJIS } from './constants.tsx';
 import { 
@@ -42,6 +44,83 @@ const fetchDailyQuotes = async (): Promise<DailyQuote[] | null> => {
     console.error("DeepSeek API failed:", e);
     return null;
   }
+};
+
+// --- Background Music Component ---
+const BackgroundMusic: React.FC<{ isStarted: boolean }> = ({ isStarted }) => {
+  const [isMuted, setIsMuted] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const clickSoundRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = 0.2; // Set a very gentle volume
+    }
+    if (clickSoundRef.current) {
+      clickSoundRef.current.volume = 0.4;
+    }
+
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const isClickable = 
+        target.tagName === 'BUTTON' || 
+        target.tagName === 'A' || 
+        target.closest('button') || 
+        target.closest('a') ||
+        window.getComputedStyle(target).cursor === 'pointer';
+
+      if (isClickable && clickSoundRef.current) {
+        clickSoundRef.current.currentTime = 0;
+        clickSoundRef.current.play().catch(() => {});
+      }
+    };
+
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, []);
+
+  useEffect(() => {
+    if (isStarted && audioRef.current) {
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.log("Playback prevented by browser:", error);
+        });
+      }
+    }
+  }, [isStarted]);
+
+  const toggleMute = () => {
+    if (audioRef.current) {
+      const newMutedState = !isMuted;
+      audioRef.current.muted = newMutedState;
+      setIsMuted(newMutedState);
+    }
+  };
+
+  return (
+    <div className="fixed top-6 right-6 z-[100]">
+      <audio
+        ref={audioRef}
+        src="https://cdn.pixabay.com/audio/2022/08/02/audio_88458c6146.mp3"
+        loop
+        preload="auto"
+      />
+      <audio
+        ref={clickSoundRef}
+        src="https://www.soundjay.com/misc/sounds/water-droplet-1.mp3"
+        preload="auto"
+      />
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        onClick={toggleMute}
+        className="w-10 h-10 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-xl border border-white/40 text-[#5d5c5a] shadow-lg hover:bg-white/40 transition-colors"
+      >
+        {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+      </motion.button>
+    </div>
+  );
 };
 
 // --- Main App ---
@@ -115,56 +194,59 @@ const App: React.FC = () => {
     dbClient.saveMoments(newMoments); // 同步到云端
   };
 
-  if (view === 'intro') return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-10 text-center animate-fadeIn relative overflow-hidden bg-[#fff0f3]">
-       <div className="w-80 h-80 bg-[#ffb5a7] rounded-full blur-[100px] absolute -top-20 -left-20 opacity-50 animate-float" />
-       <div className="w-80 h-80 bg-[#ffccd5] rounded-full blur-[100px] absolute -bottom-20 -right-20 opacity-50 animate-float" style={{animationDelay: '-3s'}} />
-       
-       <div className="relative z-10 space-y-8">
-         <div className="text-6xl mb-4 animate-float">🌸</div>
-         <h1 className="text-4xl font-light tracking-[0.4em] text-[#5d5c5a] serif mb-4">爱意花园</h1>
-         <p className="text-[#8a8987] font-light leading-loose serif max-w-[280px] mx-auto text-lg">
-           治愈你的情绪，<br/>读懂你的心意，<br/>陪伴如约而至。
-         </p>
-         <button onClick={() => setView('home')} className="mt-12 px-16 py-4 bg-[#ffb5a7] text-white rounded-full shadow-2xl shadow-pink-300/50 active:scale-95 transition-all font-bold tracking-[0.2em] text-base border border-white/30">
-           开启治愈
-         </button>
-       </div>
-    </div>
-  );
-
   return (
     <div className="max-w-md mx-auto min-h-screen pb-40 relative no-scrollbar">
-      {view === 'home' && <HomeView aiQuotes={aiQuotes} time={currentTime} />}
-      {view === 'timeline' && (
-        <TimelineView 
-          moments={moments} 
-          onAdd={addMoment} 
-          onPartnerAction={handlePartnerAction}
-        />
-      )}
-      {view === 'garden' && <GardenView garden={garden} moments={moments} />}
+      <BackgroundMusic isStarted={view !== 'intro'} />
+      {view === 'intro' ? (
+        <div className="flex flex-col items-center justify-center min-h-screen px-10 text-center animate-fadeIn relative overflow-hidden bg-[#fff0f3] -mx-4 sm:-mx-8">
+           <div className="w-80 h-80 bg-[#ffb5a7] rounded-full blur-[100px] absolute -top-20 -left-20 opacity-50 animate-float" />
+           <div className="w-80 h-80 bg-[#ffccd5] rounded-full blur-[100px] absolute -bottom-20 -right-20 opacity-50 animate-float" style={{animationDelay: '-3s'}} />
+           
+           <div className="relative z-10 space-y-8">
+             <div className="text-6xl mb-4 animate-float">🌸</div>
+             <h1 className="text-4xl font-light tracking-[0.4em] text-[#5d5c5a] serif mb-4">爱意花园</h1>
+             <p className="text-[#8a8987] font-light leading-loose serif max-w-[280px] mx-auto text-lg">
+               治愈你的情绪，<br/>读懂你的心意，<br/>陪伴如约而至。
+             </p>
+             <button onClick={() => setView('home')} className="mt-12 px-16 py-4 bg-[#ffb5a7] text-white rounded-full shadow-2xl shadow-pink-300/50 active:scale-95 transition-all font-bold tracking-[0.2em] text-base border border-white/30">
+               开启治愈
+             </button>
+           </div>
+        </div>
+      ) : (
+        <>
+          {view === 'home' && <HomeView aiQuotes={aiQuotes} time={currentTime} />}
+          {view === 'timeline' && (
+            <TimelineView 
+              moments={moments} 
+              onAdd={addMoment} 
+              onPartnerAction={handlePartnerAction}
+            />
+          )}
+          {view === 'garden' && <GardenView garden={garden} moments={moments} />}
 
-      {/* Main Navigation */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[92%] max-w-sm h-20 bg-white/70 backdrop-blur-3xl rounded-[2.5rem] flex items-center justify-around px-8 z-50 shadow-2xl border border-pink-100/50">
-        {[
-          { id: 'home', label: '补给', icon: '☁️' },
-          { id: 'timeline', label: '此刻', icon: '✍️' },
-          { id: 'garden', label: '花园', icon: '🌹' },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setView(tab.id as View)}
-            className={`flex flex-col items-center transition-all duration-500 py-2 relative ${view === tab.id ? 'text-[#e5989b] scale-110' : 'text-gray-400 opacity-50'}`}
-          >
-            <span className="text-2xl mb-1">{tab.icon}</span>
-            <span className="text-[10px] font-black uppercase tracking-[0.1em]">{tab.label}</span>
-            {view === tab.id && (
-              <div className="absolute -bottom-1 w-1.5 h-1.5 bg-[#e5989b] rounded-full shadow-lg shadow-pink-200" />
-            )}
-          </button>
-        ))}
-      </div>
+          {/* Main Navigation */}
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[92%] max-w-sm h-20 bg-white/70 backdrop-blur-3xl rounded-[2.5rem] flex items-center justify-around px-8 z-50 shadow-2xl border border-pink-100/50">
+            {[
+              { id: 'home', label: '补给', icon: '☁️' },
+              { id: 'timeline', label: '此刻', icon: '✍️' },
+              { id: 'garden', label: '花园', icon: '🌹' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setView(tab.id as View)}
+                className={`flex flex-col items-center transition-all duration-500 py-2 relative ${view === tab.id ? 'text-[#e5989b] scale-110' : 'text-gray-400 opacity-50'}`}
+              >
+                <span className="text-2xl mb-1">{tab.icon}</span>
+                <span className="text-[10px] font-black uppercase tracking-[0.1em]">{tab.label}</span>
+                {view === tab.id && (
+                  <div className="absolute -bottom-1 w-1.5 h-1.5 bg-[#e5989b] rounded-full shadow-lg shadow-pink-200" />
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 };
